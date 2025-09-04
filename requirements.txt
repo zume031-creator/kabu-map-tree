@@ -1,0 +1,9 @@
+Flask
+Flask-SQLAlchemy
+Werkzeug
+Flask-Login
+yfinance
+python-dotenv
+google-cloud-aiplatform
+gunicorn
+psycopg2-binary

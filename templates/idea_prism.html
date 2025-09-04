@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}アイデア・プリズム - 株マップツリー{% endblock %}
+
+{% block content %}<style>
+    .node circle { fill: #fff; stroke: #0d6efd; stroke-width: 3px; cursor: pointer; }
+    .node text { font-size: 14px; }
+    /* ★ここからが修正箇所 */
+    .link {
+        fill: none;
+        stroke: #555; /* 線の色を濃いグレーに変更 */
+        stroke-width: 1.5px; /* 線の太さを調整 */
+    }
+    /* ★修正箇所ここまで */
+    #details-popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 350px; background: white; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 25px; z-index: 1000; }
+    #details-popup h4 { margin-top: 0; margin-bottom: 15px; }
+    #popup-close { position: absolute; top: 10px; right: 15px; border: none; background: none; font-size: 1.5em; cursor: pointer; opacity: 0.5; }
+    .popup-actions { margin-top: 20px; display: flex; justify-content: space-between; }</style><div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>アイデア・プリズム</h2>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">&laquo; ダッシュボードへ戻る</a>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">【連想モード】好きなコトバから探す</div>
+        <div class="card-body">
+            <div class="d-flex gap-2">
+                <input type="text" id="keyword" name="keyword" class="form-control" placeholder="例：キャンプ, AI, 子育て" required>
+                <button type="button" id="generate-map-btn" class="btn btn-primary text-nowrap">マップを作成</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">【ニュースモード】今日のニュースから探す
+            <button id="reload-news-btn" class="btn btn-sm btn-outline-primary">🔄 リロード</button>
+        </div>
+        <ul id="news-list" class="list-group list-group-flush">
+            {% for news in sample_news %}
+            <a href="#" class="list-group-item list-group-item-action news-link" data-news="{{ news }}">{{ news }}</a>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div id="loading" class="text-center p-4" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">マップを作成中... 🌳</p>
+    </div>
+    
+    <div class="text-center">
+        <svg width="100%" viewBox="0 0 1200 800"></svg>
+    </div></div><div id="details-popup">
+    <button id="popup-close">&times;</button>
+    <h4 id="popup-name"></h4>
+    <p id="popup-description-container"><strong>ひとこと紹介:</strong> <br><span id="popup-description"></span></p>
+    <p><strong>なぜ関連するの？:</strong> <br><span id="popup-reason"></span></p>
+    <div class="popup-actions">
+        <a id="popup-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">もっと知る</a>
+        <button id="popup-add-btn" class="btn btn-primary">マイリストに追加</button>
+    </div></div>
+{% endblock %}
+
+{% block scripts %}<script src="https://d3js.org/d3.v7.min.js"></script><script>
+    const loading = document.getElementById('loading');
+    const svg = d3.select("svg");
+    const popup = document.getElementById('details-popup');
+    const newsList = document.getElementById('news-list');
+
+    document.getElementById('generate-map-btn').addEventListener('click', function() {
+        const keyword = document.getElementById('keyword').value;
+        if (keyword) {
+            fetchMapData('/generate_map', new URLSearchParams({ keyword }));
+        } else {
+            alert('キーワードを入力してください。');
+        }
+    });
+
+    newsList.addEventListener('click', function(e) {
+        if (e.target && e.target.classList.contains('news-link')) {
+            e.preventDefault();
+            const newsHeadline = e.target.dataset.news;
+            fetchMapData('/generate_map_from_news', new URLSearchParams({ news_headline: newsHeadline }));
+        }
+    });
+
+    document.getElementById('reload-news-btn').addEventListener('click', async function() {
+        this.textContent = '読込中...';
+        this.disabled = true;
+        try {
+            const response = await fetch(`/get_latest_news?_=${new Date().getTime()}`);
+            const data = await response.json();
+            updateNewsList(data.headlines);
+        } catch (error) {
+            alert('ニュースの取得に失敗しました。');
+            console.error('Failed to reload news:', error);
+        } finally {
+            this.textContent = '🔄 リロード';
+            this.disabled = false;
+        }
+    });
+
+    document.getElementById('popup-add-btn').addEventListener('click', async function() {
+        const ticker = this.dataset.ticker;
+        if (!ticker) return;
+        this.textContent = '追加中...';
+        this.disabled = true;
+        try {
+            const response = await fetch('/add_stock_from_prism', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ 'ticker': ticker })
+            });
+            const result = await response.json();
+            alert(result.message);
+            if (response.ok) { popup.style.display = 'none'; }
+        } catch (error) {
+            alert('銘柄の追加に失敗しました。');
+            console.error('Failed to add stock:', error);
+        } finally {
+            this.textContent = 'マイリストに追加';
+            this.disabled = false;
+        }
+    });
+
+    function updateNewsList(headlines) {
+        newsList.innerHTML = '';
+        headlines.forEach(news => {
+            const a = document.createElement('a');
+            a.href = '#';
+            a.className = 'list-group-item list-group-item-action news-link';
+            a.dataset.news = news;
+            a.textContent = news;
+            newsList.appendChild(a);
+        });
+    }
+
+    async function fetchMapData(endpoint, body) {
+        svg.selectAll("*").remove();
+        loading.style.display = 'block';
+        popup.style.display = 'none';
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'マップの作成に失敗しました。');
+            }
+            const data = await response.json();
+            drawTree(data);
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            loading.style.display = 'none';
+        }
+    }
+
+    function drawTree(data) {
+        const width = 1200, height = 800;
+        const margin = { top: 20, right: 250, bottom: 30, left: 120 };
+        const root = d3.hierarchy(data);
+        const treeLayout = d3.tree().size([height - margin.top - margin.bottom, width - margin.left - margin.right]);
+        treeLayout(root);
+        svg.selectAll("*").remove();
+        const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+        g.selectAll('path.link').data(root.links()).enter().append('path').classed('link', true)
+            .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x));
+        const node = g.selectAll('g.node').data(root.descendants()).enter().append('g')
+            .classed('node', d => d.children ? 'node--internal' : 'node--leaf')
+            .attr('transform', d => `translate(${d.y},${d.x})`);
+        node.append('circle').attr('r', 7);
+        node.append('text').text(d => d.data.name).attr('dy', '0.31em').attr('x', d => d.children ? -12 : 12)
+            .attr('text-anchor', d => d.children ? 'end' : 'start')
+            .on('click', (event, d) => {
+                if (!d.children) showDetails(d.data);
+            });
+    }
+
+    function showDetails(data) {
+        document.getElementById('popup-add-btn').dataset.ticker = data.ticker;
+        document.getElementById('popup-name').textContent = `${data.name} (${data.ticker})`;
+        document.getElementById('popup-reason').textContent = data.reason;
+        const descContainer = document.getElementById('popup-description-container');
+        if (data.description) {
+            document.getElementById('popup-description').textContent = data.description;
+            descContainer.style.display = 'block';
+        } else {
+            descContainer.style.display = 'none';
+        }
+        const link = document.getElementById('popup-link');
+        link.href = `https://finance.yahoo.co.jp/quote/${data.ticker}`;
+        popup.style.display = 'block';
+    }
+
+    document.getElementById('popup-close').addEventListener('click', () => {
+        popup.style.display = 'none';
+    });</script>
+{% endblock %}

@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}ダッシュボード - 株マップツリー{% endblock %}
+
+{% block content %}<style>
+    .clickable-row { cursor: pointer; }
+    .sortable:hover { background-color: #f8f9fa; }
+    .text-end { text-align: right !important; }
+    #analysis_text { min-height: 200px; }
+    #analysis_content, #memoContent { white-space: pre-wrap; overflow-wrap: break-word; }</style><div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>ダッシュボード</h2>
+        <p class="mb-0">こんにちは、{{ username }}さん！</p>
+    </div>
+    <div class="card text-center mb-4 border-primary border-2">
+        <div class="card-body">
+            <h5 class="card-title">新しい投資アイデアを探す</h5>
+            <p class="card-text">「連想モード」や「ニュースモード」を使って、新しい投資のヒントを見つけましょう。</p>
+            <a href="{{ url_for('idea_prism') }}" class="btn btn-primary">アイデア・プリズムへ</a>
+        </div>
+    </div>
+    <div class="card mb-4">
+        <div class="card-header">新しい銘柄を追加</div>
+        <div class="card-body">
+            <form method="post">
+                <div class="mb-3">
+                    <label for="ticker" class="form-label">ティッカーシンボル (例: 7203.T トヨタ, AAPL Apple):</label>
+                    <input type="text" class="form-control" id="ticker" name="ticker" required>
+                </div>
+                <div class="mb-3">
+                    <label for="memo" class="form-label">メモ:</label>
+                    <textarea class="form-control" id="memo" name="memo" rows="2"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="analysis_text" class="form-label">分析内容:</label>
+                    <div class="input-group">
+                        <textarea class="form-control" id="analysis_text" name="analysis_text" rows="8"></textarea>
+                    </div>
+                    <div class="d-flex justify-content-end mt-2">
+                        <button type="button" id="generate-analysis-btn" class="btn btn-sm btn-outline-primary">
+                            <span id="analysis-spinner" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                            <span id="analysis-btn-text">AIで銘柄を分析</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label d-block">評価:</label>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" id="buy" name="rating" value="買い" checked>
+                        <label class="form-check-label" for="buy">買い</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" id="neutral" name="rating" value="中立">
+                        <label class="form-check-label" for="neutral">中立</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" id="sell" name="rating" value="売り">
+                        <label class="form-check-label" for="sell">売り</label>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">リストに追加</button>
+            </form>
+        </div>
+    </div>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3>マイリスト</h3>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('update_financial_data') }}" class="btn btn-sm btn-outline-secondary">📈 株価・指標を更新</a>
+            <a href="{{ url_for('update_analysis_data') }}" class="btn btn-sm btn-outline-primary" onclick="return confirm('全銘柄の分析更新には数分かかる場合があります。実行しますか？');">🤖 AI分析を更新</a>
+        </div>
+    </div>
+
+    <form method="get" class="row g-3 align-items-center mb-3 p-3 bg-light rounded">
+        <div class="col-md-5">
+            <label for="filter_sector" class="form-label">セクターで絞り込み:</label>
+            <select name="filter_sector" id="filter_sector" class="form-select">
+                <option value="">すべてのセクター</option>
+                {% for sector in unique_sectors %}
+                <option value="{{ sector }}" {% if sector == current_filters.sector %}selected{% endif %}>{{ sector }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-5">
+            <label for="filter_rating" class="form-label">評価で絞り込み:</label>
+            <select name="filter_rating" id="filter_rating" class="form-select">
+                <option value="">すべての評価</option>
+                <option value="買い" {% if '買い' == current_filters.rating %}selected{% endif %}>買い</option>
+                <option value="中立" {% if '中立' == current_filters.rating %}selected{% endif %}>中立</option>
+                <option value="売り" {% if '売り' == current_filters.rating %}selected{% endif %}>売り</option>
+            </select>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary w-100">絞り込み</button>
+        </div>
+    </form>
+    
+    {% if stocks %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th class="sortable"><a href="{{ url_for('dashboard', sort_by='company_name', order='asc' if current_sort.by == 'company_name' and current_sort.order == 'desc' else 'desc') }}">企業名(日本語)</a></th>
+                        <th class="sortable"><a href="{{ url_for('dashboard', sort_by='company_name_en', order='asc' if current_sort.by == 'company_name_en' and current_sort.order == 'desc' else 'desc') }}">企業名(英語)</a></th>
+                        <th class="sortable"><a href="{{ url_for('dashboard', sort_by='ticker', order='asc' if current_sort.by == 'ticker' and current_sort.order == 'desc' else 'desc') }}">ティッカー</a></th>
+                        <th class="sortable"><a href="{{ url_for('dashboard', sort_by='rating', order='asc' if current_sort.by == 'rating' and current_sort.order == 'desc' else 'desc') }}">評価</a></th>
+                        <th class="text-end">現在株価</th>
+                        <th class="text-end sortable"><a href="{{ url_for('dashboard', sort_by='performance', order='asc' if current_sort.by == 'performance' and current_sort.order == 'desc' else 'desc') }}">パフォーマンス</a></th>
+                        <th class="text-end sortable"><a href="{{ url_for('dashboard', sort_by='per', order='asc' if current_sort.by == 'per' and current_sort.order == 'desc' else 'desc') }}">予想PER(倍)</a></th>
+                        <th class="text-end sortable"><a href="{{ url_for('dashboard', sort_by='pbr', order='asc' if current_sort.by == 'pbr' and current_sort.order == 'desc' else 'desc') }}">PBR(倍)</a></th>
+                        <th class="text-end sortable"><a href="{{ url_for('dashboard', sort_by='dividend_yield', order='asc' if current_sort.by == 'dividend_yield' and current_sort.order == 'desc' else 'desc') }}">配当利回り</a></th>
+                        <th>変更点</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stock in stocks %}
+                    <tr class="clickable-row" data-bs-toggle="modal" data-bs-target="#memoModal" 
+                        data-company="{{ stock.company_name }}" 
+                        data-memo="{{ stock.memo or '' }}"
+                        data-analysis="{{ stock.analysis_text or '' }}">
+                        <td>{{ stock.company_name }}</td>
+                        <td>{{ stock.company_name_en }}</td>
+                        <td>{{ stock.ticker }}</td>
+                        <td>{{ stock.rating }}</td>
+                        <td class="text-end">{{ "%.2f"|format(stock.current_price) if stock.current_price is not none else 'N/A' }}</td>
+                        <td class="text-end fw-bold {% if stock.performance >= 0 %}text-success{% else %}text-danger{% endif %}">{{ "%.2f"|format(stock.performance) }}%</td>
+                        <td class="text-end">{{ "%.2f"|format(stock.per) if stock.per is not none else 'N/A' }}</td>
+                        <td class="text-end">{{ "%.2f"|format(stock.pbr) if stock.pbr is not none else 'N/A' }}</td>
+                        <td class="text-end">
+                            {% if stock.dividend_yield is not none %}
+                                {{ "%.2f"|format(stock.dividend_yield) }}%
+                            {% else %}
+                                N/A
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if stock.has_update %}
+                                <span class="text-danger fw-bold">●</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="d-flex gap-2">
+                                <a href="{{ url_for('edit_stock', stock_id=stock.id) }}" class="btn btn-sm btn-outline-primary">編集</a>
+                                <form action="{{ url_for('delete_stock', stock_id=stock.id) }}" method="post" class="d-inline" onclick="event.stopPropagation();">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('本当に削除しますか？');">削除</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="alert alert-secondary">まだマイリストに銘柄がありません。</div>
+    {% endif %}</div><div class="modal fade" id="memoModal" tabindex="-1" aria-labelledby="memoModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="memoModalLabel">詳細情報</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <h6>分析内容</h6>
+        <div id="analysis_content" class="p-2 bg-light rounded mb-3"></div>
+        <hr>
+        <h6>個人メモ</h6>
+        <p id="memoContent"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+      </div>
+    </div>
+  </div></div>
+{% endblock %}
+
+{% block scripts %}<script>document.addEventListener('DOMContentLoaded', function() {
+    const memoModal = document.getElementById('memoModal');
+    if (memoModal) {
+        memoModal.addEventListener('show.bs.modal', function (event) {
+            const row = event.relatedTarget;
+            const companyName = row.getAttribute('data-company');
+            const memoText = row.getAttribute('data-memo');
+            const analysisText = row.getAttribute('data-analysis');
+
+            const modalTitle = memoModal.querySelector('.modal-title');
+            const memoBody = memoModal.querySelector('#memoContent');
+            const analysisBody = memoModal.querySelector('#analysis_content');
+            
+            modalTitle.textContent = companyName + ' の詳細情報';
+            
+            if (analysisText) {
+                analysisBody.textContent = analysisText;
+            } else {
+                analysisBody.textContent = '（分析内容は登録されていません）';
+            }
+
+            if (memoText) {
+                memoBody.textContent = memoText;
+            } else {
+                memoBody.textContent = '（メモは登録されていません）';
+            }
+        });
+    }
+
+    const analysisBtn = document.getElementById('generate-analysis-btn');
+    if(analysisBtn) {
+        analysisBtn.addEventListener('click', async function() {
+            const tickerInput = document.getElementById('ticker');
+            const ticker = tickerInput.value;
+            if (!ticker) {
+                alert('先にティッカーシンボルを入力してください。');
+                return;
+            }
+
+            const analysisTextArea = document.getElementById('analysis_text');
+            const spinner = document.getElementById('analysis-spinner');
+            const btnText = document.getElementById('analysis-btn-text');
+
+            this.disabled = true;
+            spinner.style.display = 'inline-block';
+            btnText.textContent = '分析中...';
+            analysisTextArea.value = 'Geminiが分析を生成中です。しばらくお待ちください...';
+
+            try {
+                const formData = new FormData();
+                formData.append('ticker', ticker);
+
+                const response = await fetch('/generate_analysis', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    analysisTextArea.value = result.analysis_text;
+                } else {
+                    throw new Error(result.error || '不明なエラー');
+                }
+            } catch (error) {
+                console.error('Analysis generation failed:', error);
+                analysisTextArea.value = 'エラーが発生しました。コンソールを確認してください。\n' + error.message;
+            } finally {
+                this.disabled = false;
+                spinner.style.display = 'none';
+                btnText.textContent = 'AIで銘柄を分析';
+            }
+        });
+    }
+});</script>
+{% endblock %}

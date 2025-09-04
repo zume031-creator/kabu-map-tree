@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>株マップツリー</title>
+</head>
+<body>
+    <h1>株マップツリーへようこそ！</h1>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <ul>
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
+    {% if current_user.is_authenticated %}
+        <p>こんにちは、{{ current_user.username }}さん！</p>
+        <a href="/dashboard">ダッシュボードへ</a>
+        <a href="/logout">ログアウト</a>
+    {% else %}
+        <a href="/register">ユーザー登録</a>
+        <a href="/login">ログイン</a>
+    {% endif %}
+</body>
+</html>
