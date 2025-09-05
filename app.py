@@ -43,18 +43,18 @@ try:
     location = os.environ.get("GOOGLE_CLOUD_LOCATION")
     # ローカル認証とGCP環境での認証を両立させるため、projectとlocationが取得できた場合のみ初期化
     if project_id and location:
-        vertexai.init(project=project=project_id, location=location)
+        # ▼▼▼ 今回の修正箇所 ▼▼▼
+        vertexai.init(project=project_id, location=location)
+        # ▲▲▲ 今回の修正箇所 ▲▲▲
 except Exception as e:
     print(f"Vertex AIの初期化中にエラーが発生しました: {e}")
     # アプリケーションの起動は続行する
 
 db = SQLAlchemy(app)
 
-# ▼▼▼ 今回の修正箇所 ▼▼▼
 # アプリケーションコンテキスト内でテーブルを自動作成する
 with app.app_context():
     db.create_all()
-# ▲▲▲ 今回の修正箇所 ▲▲▲
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -229,7 +229,7 @@ def dashboard():
                 company_name_jp = get_japanese_name_by_gemini(ticker)
                 sector_en = info.get('sector', 'N/A')
                 sector_jp = SECTOR_TRANSLATION.get(sector_en, sector_en)
-
+                
                 per = info.get('forwardPE') or info.get('trailingPE')
                 pbr = info.get('priceToBook')
                 dividend_yield = info.get('dividendYield')
@@ -250,12 +250,12 @@ def dashboard():
                     analysis_text=analysis_text,
                     has_update=False
                 )
-
+                
                 if rating == '買い':
                     new_stock.rating_date = datetime.utcnow()
                 else:
                     new_stock.rating_date = None
-
+                    
                 db.session.add(new_stock)
                 db.session.commit()
                 flash('新しい銘柄をリストに追加しました。')
@@ -283,7 +283,7 @@ def dashboard():
         user_stocks.sort(key=lambda x: x.performance, reverse=(order == 'desc'))
     all_user_stocks = db.session.query(StockItem.sector).filter(StockItem.user_id == current_user.id).distinct().all()
     unique_sectors = sorted([s[0] for s in all_user_stocks if s[0]])
-
+    
     return render_template('dashboard.html', 
                            username=current_user.username, 
                            stocks=user_stocks,
@@ -299,14 +299,14 @@ def update_financial_data():
         try:
             stock_data = yf.Ticker(stock.ticker)
             info = stock_data.info
-
+            
             stock.current_price = info.get('currentPrice') or info.get('regularMarketPrice')
             stock.per = info.get('forwardPE') or info.get('trailingPE')
             stock.pbr = info.get('priceToBook')
             stock.dividend_yield = info.get('dividendYield')
         except Exception as e:
             print(f"Could not update financial data for {stock.ticker}: {e}")
-
+            
     db.session.commit()
     flash('株価と財務指標を更新しました。')
     return redirect(url_for('dashboard'))
@@ -328,7 +328,7 @@ def update_analysis_data():
                     stock.has_update = False
         except Exception as e:
             print(f"Could not update analysis for {stock.ticker}: {e}")
-
+    
     db.session.commit()
     if updated_count > 0:
         flash(f'{updated_count}件の銘柄で分析内容が更新されました。')
@@ -396,11 +396,11 @@ def edit_stock(stock_id):
     if request.method == 'POST':
         original_rating = stock_to_edit.rating
         new_rating = request.form.get('rating')
-
+        
         stock_to_edit.company_name = request.form.get('company_name')
         stock_to_edit.memo = request.form.get('memo')
         stock_to_edit.rating = new_rating
-
+        
         if new_rating == '買い':
             if original_rating != '買い' or stock_to_edit.rating_date is None:
                 stock_to_edit.rating_date = datetime.utcnow()
@@ -444,19 +444,19 @@ def process_ai_request(prompt):
         model = GenerativeModel("gemini-1.5-flash")
         generation_config = {"temperature": 0.7}
         response = model.generate_content(prompt, generation_config=generation_config)
-
+        
         if not response.candidates:
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
                  print(f"Prompt Feedback: {response.prompt_feedback}")
             return jsonify({"error": "AIからの応答がありませんでした。ブロックされた可能性があります。"}), 500
-
+            
         json_string = extract_json(response.text)
         if not json_string:
             print(f"--- No JSON found in AI response ---")
             print(f"Raw AI Response: {response.text}")
             print("------------------------------------")
             return jsonify({"error": "AIの応答から有効なデータ形式を抽出できませんでした。"}), 500
-
+        
         json_response = json.loads(json_string)
         print("--- Sending this JSON data to frontend ---")
         print(json.dumps(json_response, indent=2, ensure_ascii=False))
@@ -491,7 +491,7 @@ def generate_map():
     keyword = request.form.get('keyword')
     if not keyword:
         return jsonify({"error": "キーワードがありません"}), 400
-
+    
     prompt = f"""
     「{keyword}」というキーワードから連想される「モノやコト」を5つ挙げ、それぞれに関連する日本の主要な上場企業を3社ずつ挙げてください。
     各企業について、以下の情報を必ず含めてください。
@@ -532,11 +532,11 @@ def add_stock_from_prism():
         existing_stock = db.session.scalar(stmt)
         if existing_stock:
             return jsonify(success=False, message="この銘柄は既に追加されています。"), 409
-
+        
         stock_data = yf.Ticker(ticker)
         info = stock_data.info
         current_price = info.get('currentPrice') or info.get('regularMarketPrice')
-
+        
         if current_price is None:
             return jsonify(success=False, message=f"ティッカー「{ticker}」の株価を取得できませんでした。"), 404
 
