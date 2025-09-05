@@ -17,7 +17,7 @@ from vertexai.generative_models import GenerativeModel
 load_dotenv()
 app = Flask(__name__)
 
-# --- ▼▼▼ Renderデプロイ用に修正した箇所 ▼▼▼ ---
+# --- Renderデプロイ用に修正した箇所 ---
 
 # SECRET_KEYを環境変数から取得するように変更
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-secret-key-for-local-dev')
@@ -33,7 +33,7 @@ else:
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- ▲▲▲ 修正箇所ここまで ▲▲▲ ---
+# --- 修正箇所ここまで ---
 
 # 開発中はTrueにするとAPIを消費せずに固定データを返す
 DEV_MODE = False
@@ -43,12 +43,19 @@ try:
     location = os.environ.get("GOOGLE_CLOUD_LOCATION")
     # ローカル認証とGCP環境での認証を両立させるため、projectとlocationが取得できた場合のみ初期化
     if project_id and location:
-        vertexai.init(project=project_id, location=location)
+        vertexai.init(project=project=project_id, location=location)
 except Exception as e:
     print(f"Vertex AIの初期化中にエラーが発生しました: {e}")
     # アプリケーションの起動は続行する
 
 db = SQLAlchemy(app)
+
+# ▼▼▼ 今回の修正箇所 ▼▼▼
+# アプリケーションコンテキスト内でテーブルを自動作成する
+with app.app_context():
+    db.create_all()
+# ▲▲▲ 今回の修正箇所 ▲▲▲
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
@@ -105,7 +112,7 @@ def get_japanese_name_by_gemini(ticker):
     if DEV_MODE:
         return "（開発モード名称）"
     try:
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-1.5-flash")
         prompt = f"""
         証券コード「{ticker}」の正式な日本語社名を教えてください。
         以下のJSON形式のみで、他の文字列は一切含めずに回答してください。
@@ -125,7 +132,7 @@ def generate_initial_analysis(ticker, company_name):
     if DEV_MODE:
         return "これは開発モードの分析テキストです。"
     try:
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-1.5-flash")
         prompt = f"""
         あなたはプロの証券アナリストです。日本の企業「{company_name}（証券コード: {ticker}）」について、以下の観点から詳細な分析レポートを作成してください。
 
@@ -156,7 +163,7 @@ def update_analysis_with_news(ticker, company_name, old_analysis):
     if DEV_MODE:
         return old_analysis + "\n\n---\n\n**【2025-09-04 更新】**\n- 開発モードでの更新テストです。"
     try:
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-1.5-flash")
         prompt = f"""
         あなたはプロの証券アナリストです。日本の企業「{company_name}（証券コード: {ticker}）」に関する既存の分析レポートを、最新情報で更新するタスクです。
 
@@ -222,7 +229,7 @@ def dashboard():
                 company_name_jp = get_japanese_name_by_gemini(ticker)
                 sector_en = info.get('sector', 'N/A')
                 sector_jp = SECTOR_TRANSLATION.get(sector_en, sector_en)
-                
+
                 per = info.get('forwardPE') or info.get('trailingPE')
                 pbr = info.get('priceToBook')
                 dividend_yield = info.get('dividendYield')
@@ -243,12 +250,12 @@ def dashboard():
                     analysis_text=analysis_text,
                     has_update=False
                 )
-                
+
                 if rating == '買い':
                     new_stock.rating_date = datetime.utcnow()
                 else:
                     new_stock.rating_date = None
-                    
+
                 db.session.add(new_stock)
                 db.session.commit()
                 flash('新しい銘柄をリストに追加しました。')
@@ -276,7 +283,7 @@ def dashboard():
         user_stocks.sort(key=lambda x: x.performance, reverse=(order == 'desc'))
     all_user_stocks = db.session.query(StockItem.sector).filter(StockItem.user_id == current_user.id).distinct().all()
     unique_sectors = sorted([s[0] for s in all_user_stocks if s[0]])
-    
+
     return render_template('dashboard.html', 
                            username=current_user.username, 
                            stocks=user_stocks,
@@ -292,14 +299,14 @@ def update_financial_data():
         try:
             stock_data = yf.Ticker(stock.ticker)
             info = stock_data.info
-            
+
             stock.current_price = info.get('currentPrice') or info.get('regularMarketPrice')
             stock.per = info.get('forwardPE') or info.get('trailingPE')
             stock.pbr = info.get('priceToBook')
             stock.dividend_yield = info.get('dividendYield')
         except Exception as e:
             print(f"Could not update financial data for {stock.ticker}: {e}")
-            
+
     db.session.commit()
     flash('株価と財務指標を更新しました。')
     return redirect(url_for('dashboard'))
@@ -321,7 +328,7 @@ def update_analysis_data():
                     stock.has_update = False
         except Exception as e:
             print(f"Could not update analysis for {stock.ticker}: {e}")
-    
+
     db.session.commit()
     if updated_count > 0:
         flash(f'{updated_count}件の銘柄で分析内容が更新されました。')
@@ -389,11 +396,11 @@ def edit_stock(stock_id):
     if request.method == 'POST':
         original_rating = stock_to_edit.rating
         new_rating = request.form.get('rating')
-        
+
         stock_to_edit.company_name = request.form.get('company_name')
         stock_to_edit.memo = request.form.get('memo')
         stock_to_edit.rating = new_rating
-        
+
         if new_rating == '買い':
             if original_rating != '買い' or stock_to_edit.rating_date is None:
                 stock_to_edit.rating_date = datetime.utcnow()
@@ -409,7 +416,7 @@ def get_news_from_ai():
     if DEV_MODE:
         return ["（開発モード）...", "（開発モード）...", "（開発モード）...", "（開発モード）...", "（開発モード）..."]
     try:
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-1.5-flash")
         current_time_str = datetime.now().strftime("%Y年%m月%d日 %H時%M分%S秒")
         prompt = f"""
         現在の時刻は {current_time_str} です。この現時刻の情報を元に、日本の経済や株式市場に影響を与えそうな、最新のニュースヘッドラインを5つ生成してください。
@@ -434,22 +441,22 @@ def process_ai_request(prompt):
         sample_data = {"name": "開発モード", "children": [{"name": "サンプル分野", "children": [{"name": "サンプル企業A", "ticker": "1111.T"}, {"name": "サンプル企業B", "ticker": "2222.T"}]}]}
         return jsonify(sample_data), 200
     try:
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-1.5-flash")
         generation_config = {"temperature": 0.7}
         response = model.generate_content(prompt, generation_config=generation_config)
-        
+
         if not response.candidates:
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
                  print(f"Prompt Feedback: {response.prompt_feedback}")
             return jsonify({"error": "AIからの応答がありませんでした。ブロックされた可能性があります。"}), 500
-            
+
         json_string = extract_json(response.text)
         if not json_string:
             print(f"--- No JSON found in AI response ---")
             print(f"Raw AI Response: {response.text}")
             print("------------------------------------")
             return jsonify({"error": "AIの応答から有効なデータ形式を抽出できませんでした。"}), 500
-        
+
         json_response = json.loads(json_string)
         print("--- Sending this JSON data to frontend ---")
         print(json.dumps(json_response, indent=2, ensure_ascii=False))
@@ -484,7 +491,7 @@ def generate_map():
     keyword = request.form.get('keyword')
     if not keyword:
         return jsonify({"error": "キーワードがありません"}), 400
-    
+
     prompt = f"""
     「{keyword}」というキーワードから連想される「モノやコト」を5つ挙げ、それぞれに関連する日本の主要な上場企業を3社ずつ挙げてください。
     各企業について、以下の情報を必ず含めてください。
@@ -525,11 +532,11 @@ def add_stock_from_prism():
         existing_stock = db.session.scalar(stmt)
         if existing_stock:
             return jsonify(success=False, message="この銘柄は既に追加されています。"), 409
-        
+
         stock_data = yf.Ticker(ticker)
         info = stock_data.info
         current_price = info.get('currentPrice') or info.get('regularMarketPrice')
-        
+
         if current_price is None:
             return jsonify(success=False, message=f"ティッカー「{ticker}」の株価を取得できませんでした。"), 404
 
@@ -567,6 +574,7 @@ def add_stock_from_prism():
         print(f"Error adding stock from prism: {e}")
         return jsonify(success=False, message="銘柄の追加中にエラーが発生しました。"), 500
 if __name__ == '__main__':
+    # 以下のブロックはローカル実行時のみ使用され、Renderでは使われません
     with app.app_context():
         db.create_all()
     # ポート番号を環境変数から取得し、デフォルトを8080に設定
